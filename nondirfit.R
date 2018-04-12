@@ -17,12 +17,16 @@ if(FALSE) {
   source("nondirfit.R") #load R function
   
   #Make fake data:
-  x1<-2+rnorm(100); x2<-7+3*x1+rnorm(100)
+  x1<-2+rnorm(100); x2<-7+3*x1+rnorm(100);
   plot(x1~x2)
   vardf<-data.frame(x1, x2)
   
   #Run analysis
-  out<-nondirfit(vardf)
+  #wts<-c(1, 2) #weights by x1 vs. x2
+  #wts<-runif(100) #weights per row
+  #wts<-matrix(nrow=100, runif(100*2)) #weights per observation
+  wts<-NA
+  out<-nondirfit(vardf, wts=wts)
   
   #Extract parameters
   parms<-out$pars
@@ -39,9 +43,14 @@ if(FALSE) {
 
 
 
-nondirfit<-function(vardf, doscale=TRUE) {
+nondirfit<-function(vardf, doscale=TRUE, wts=NA) {
   #Runs a type II regression among all variables in vardf
   #vardf is a dataframe with columns of variables to be fit nodirectionally
+  #wts is a weights matrix:
+    #if length = row number, then assumes one weight for every row
+    #if length = col number, then assumes one weight for every colmn
+    #if a matrix, then assumes one weight for every trait for every species
+    #if NA, then no weights
   
   #Function automatically scales all variables, then returns back-tranformed parameter estimates
   #note, output$pars is in the format 0 = b1*x1+b2*x2+b3*x3...
@@ -49,12 +58,6 @@ nondirfit<-function(vardf, doscale=TRUE) {
   var<-vardf
   if(ncol(var)<=1 | nrow(var)<=1) {
     stop("too few variables to regress")
-  }
-  
-  if(is.null(colnames(var))) {
-    if(ncol(var)>3)
-      stop("too many columns - don't even think about it")
-    colnames(var)<-letters(1:ncol(var))
   }
   
   #scale data
@@ -76,7 +79,7 @@ nondirfit<-function(vardf, doscale=TRUE) {
   modc[vn[1]]<-(-1)
   
   #optimize nondirectionally
-  optc<-optim(par = modc, fn = optfun, gr = NULL, extraparms=list(varsc=varsc, vn=vn))$par
+  optc<-optim(par = modc, fn = optfun, gr = NULL, extraparms=list(varsc=varsc, vn=vn, wts=wts))$par
   optc<-optc/optc[2]
   
   #Calcuate predicted (and unscaled) values
@@ -114,20 +117,31 @@ nondirfit<-function(vardf, doscale=TRUE) {
   
   colnames(possnap)<-colnames(var)
   
-  #Get estimate of model fit
+  #Get estimate of model fit - NOT weighted
   SSres<-sum((possnapsc-varsc)^2, na.rm=T)
   SStot<-sum((t(varsc)-colMeans(varsc, na.rm=T))^2, na.rm=T) #NB - ybar ~ 0
   rsq_est<-(1-SSres/SStot)
   p<-ncol(varsc); n<-nrow(varsc)
   rsq_est_adj<-rsq_est-(1-rsq_est)*p/(n-p-1)
   
-  return(list(possnap=possnap, pred=hatv, vars=var, pars=optc_notsc, rsq=list(rsq_est=rsq_est, rsq_est_adj=rsq_est_adj),
+  #Get R2 estimates for each axis - NOT weighted
+  rsq_partial<-numeric(ncol(varsc))
+  for(i in 1:ncol(varsc)) {
+    SSres_tmp<-sum((possnapsc[,i]-varsc[,i])^2, na.rm=T)
+    SStot_tmp<-sum((t(varsc[,i])-mean(varsc[,i], na.rm=T))^2, na.rm=T) #NB - ybar ~ 0
+    rsq_partial[i]<-(1-SSres_tmp/SStot_tmp)
+  }
+  
+  
+  return(list(possnap=possnap, pred=hatv, vars=var, pars=optc_notsc, rsq=list(rsq_est=rsq_est, rsq_est_adj=rsq_est_adj), rsq_partial=rsq_partial,
               scl=list(sdmat=sdmat, mnmat=mnmat, possnapsc=possnapsc, predsc=hatvsc, varsc=varsc, parssc=optc)))
   #regular and scaled lists
   #possnap is values snapped to tradeoff
   #hatv is predicted values
   #pars is pars for nonparametric regression (in scaled space!!)
   #scl is scaling parameters for xscal = (x-mean(x))/sd(x)
+  #rsq describes fit for total regression
+  #rsq_partial describes fit for each axis
 }
 
 #The following are helper functions needed by the nondirfit function
@@ -135,7 +149,17 @@ optfun<-function(modc, extraparms) {
   k<-(modc[c(1, match(extraparms$vn, names(modc)))]%*%t(cbind(1, extraparms$varsc)))/sum(modc[-1]^2)
   possnapsc<-t(t(extraparms$varsc)-modc[match(extraparms$vn, names(modc))]*t(matrix(ncol=length(extraparms$vn), nrow=length(k), k)))
   
-  diffobs<-sum((rowSums((possnapsc-extraparms$varsc)^2)), na.rm=T)
+  if(sum(extraparms$wts,na.rm=T)==0) {
+    diffobs<-sum((rowSums((possnapsc-extraparms$varsc)^2, na.rm=T)), na.rm=T)
+  } else {
+    if(length(wts)==nrow(extraparms$varsc)) {
+      diffobs<-sum((rowSums((possnapsc-extraparms$varsc)^2, na.rm=T)*wts), na.rm=T)
+    } else if(length(wts)==nrow(extraparms$varsc)) {
+      diffobs<-sum((colSums(t((possnapsc-extraparms$varsc)^2)*wts, na.rm=T)), na.rm=T)
+    } else {
+      diffobs<-sum((rowSums(wts*(possnapsc-extraparms$varsc)^2, na.rm=T)), na.rm=T)
+    }
+  }
   
   return(diffobs)
 }
