@@ -17,12 +17,12 @@ if(FALSE) {
   source("nondirfit.R") #load R function
   
   #Make fake data:
-  x1<-2+rnorm(100); x2<-7+3*x1+rnorm(100);
+  x1<-2+rnorm(100,0,1); x2<-7+3*x1+rnorm(100,0,5);
   plot(x1~x2)
   vardf<-data.frame(x1, x2)
   
   #Run analysis
-  #wts<-c(1, 2) #weights by x1 vs. x2
+  #wts<-c(1, 1) #weights by x1 vs. x2
   #wts<-runif(100) #weights per row
   #wts<-matrix(nrow=100, runif(100*2)) #weights per observation
   wts<-NA
@@ -39,6 +39,10 @@ if(FALSE) {
   coef(mod)
   abline(mod, lty=2)
   #Should match closely, but not perfectly
+  
+  
+  #show residuals in scaled space - should be equal
+  colMeans(sqrt((out$scl$possnapsc-out$scl$varsc)^2))
 }
 
 
@@ -154,7 +158,7 @@ optfun<-function(modc, extraparms) {
   } else {
     if(length(wts)==nrow(extraparms$varsc)) {
       diffobs<-sum((rowSums((possnapsc-extraparms$varsc)^2, na.rm=T)*wts), na.rm=T)
-    } else if(length(wts)==nrow(extraparms$varsc)) {
+    } else if(length(wts)==ncol(extraparms$varsc)) {
       diffobs<-sum((colSums(t((possnapsc-extraparms$varsc)^2)*wts, na.rm=T)), na.rm=T)
     } else {
       diffobs<-sum((rowSums(wts*(possnapsc-extraparms$varsc)^2, na.rm=T)), na.rm=T)
